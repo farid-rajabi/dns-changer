@@ -1,0 +1,138 @@
+#!/bin/bash
+
+version="1.0.0"
+dns_servers="[Google]
+8.8.8.8
+8.8.4.4
+
+[Yandex Basic]
+77.88.8.8
+77.88.8.1
+
+[Yandex Safe]
+77.88.8.88
+77.88.8.2
+
+[Cloudflare]
+1.1.1.1
+1.0.0.1
+
+[OpenDNS]
+208.67.222.222
+208.67.220.220
+
+[OpenDNS FamilyShield]
+208.67.222.123
+208.67.220.123
+
+[Comodo Secure]
+8.26.56.26
+8.20.247.20
+
+[Comodo Secure Internet Gateway]
+8.26.56.10
+8.20.247.10
+
+[Quad9]
+9.9.9.9
+149.112.112.112
+
+[Norton ConnectSafe]
+199.85.126.10
+199.85.127.10
+
+[Level3]
+209.244.0.3
+209.244.0.4
+
+[Shecan]
+178.22.122.100
+185.51.200.2"
+
+help="Usage: dns-changer [OPTION]
+                   <COMMAND> [<ARGS>]
+
+OPTIONS:
+  -v,  --version    Print this help message.
+  -h,  --help       Display the program version information.
+
+COMMANDS:
+  check             Show the current DNS addresses.
+  resolv-conf       Show the content of the resolv-conf file.
+  list              List all the available DNS servers.
+  change            Change the DNS.
+  flush             Flush the DNS.
+  speed-test        Do a download/upload speed test.
+
+DNS Changer, v$version
+An open-source and free application available on GitHub: <https://github.com/farid-rajabi/dns-changer>"
+config_path="/etc/resolvconf/resolv.conf.d/head"
+
+if [ "$1" = "-v" ] || [ "$1" = "--version" ] ; then
+    echo "$version"
+# Check the current addresses
+elif [ "$1" = "check" ] ; then
+    adresses=""
+    newline=$'\n'
+    while read -r line ; do
+        adresses+="$newline${line:11:100}"
+    done < <(grep "nameserver " "$config_path")
+    # If a DNS address is set
+    if [ -n "$adresses" ] ; then
+        # Echo the name of the DNS server and its addresses
+        # Slicing from the 1st character removes \n.
+        # -Fx avoids printing any similar enteries.
+        echo "$dns_servers" | grep -B1 -Fx "${adresses:1:100}"
+    else
+        echo "No DNS address is set!"
+    fi
+# Cat resolv.conf
+elif [ "$1" = "resolv-conf" ] ; then
+    cat "$config_path"
+# List the servers
+elif [ "$1" = "list" ] ; then
+    echo "$dns_servers"
+# Change the DNS
+elif [ "$1" = "change" ] ; then
+    # If the input exists (in not empty)
+    # The user should enter the complete name of the server because of the -Fx
+    # option. It aviods any multiple results.
+    if [ -n "$(echo "$dns_servers" | grep -A2 -Fx "[$2]")" ] ; then
+        echo "$(echo "$dns_servers" | grep -A2 -Fx "[$2]")"
+        # Rewrite everything except the nameservers
+        sudo bash -c "echo '$(grep -v "nameserver " "$config_path")' > '$config_path'"
+        # Append an empty line
+        sudo bash -c "echo '' >> '$config_path'"
+        # Read two lines after the input
+        while read -r line ; do
+            # Append the addresses
+            sudo bash -c "echo 'nameserver $line' >> '$config_path'"
+        done < <(echo "$dns_servers" | grep -A2 -Fx "[$2]" | tail -n 2)
+        # Update the config
+        sudo resolvconf --enable-updates
+        sudo resolvconf -u
+        sudo systemctl restart resolvconf.service
+        sudo systemctl restart systemd-resolved.service
+        # resolvectl status
+    # If the input does not exist (is empty)
+    else
+        echo "DNS server not found!"
+    fi
+# Flush the DNS
+elif [ "$1" = "flush" ] ; then
+    # If the input exists (in not empty)
+    # Rewrite everything except the nameservers
+    sudo bash -c "echo '$(grep -v "nameserver " "$config_path")' > '$config_path'"
+    # Append an empty line
+    sudo bash -c "echo '' >> '$config_path'"
+    # Update the config
+    sudo resolvconf --enable-updates
+    sudo resolvconf -u
+    sudo systemctl restart resolvconf.service
+    sudo systemctl restart systemd-resolved.service
+    # resolvectl status
+elif [ "$1" = "speed-test" ] ; then
+    speedtest-cli --simple --secure
+else
+    echo "$help"
+fi
